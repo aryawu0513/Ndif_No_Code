@@ -22,16 +22,16 @@ llama = LanguageModel("meta-llama/Meta-Llama-3.1-8B", device="cuda")
 prompts_with_probs = pd.DataFrame(
 {
     "prompt": ['waiting for data'],
-    "layer": [1],
+    "layer": [0],
     "results": ['hi'],
-    "probs": [1],
+    "probs": [0],
     "expected": ['hi'],
 })
 prompts_with_ranks = pd.DataFrame(
 {
     "prompt": ['waiting for data'],
-    "layer": [1],
-    "ranks": [1],
+    "layer": [0],
+    "ranks": [0],
     "expected": ['hi'],
 })
 
@@ -95,10 +95,47 @@ def process_file(prompts_data,file_path):
 
 #problem with using gr.LinePlot instead of a plt.figure is that text labels cannot be added for each individual point
 def plot_prob(prompts_with_probs):
-    return gr.LinePlot(prompts_with_probs, x="layer", y="probs", color="prompt", title="Probability of Expected Token",label="results",show_label=True,key="results")
+    return gr.LinePlot(prompts_with_probs, x="layer", y="probs",color="prompt", title="Probability of Expected Token",label="results",show_label=True,key="results")
 
 def plot_rank(prompts_with_ranks):
     return gr.LinePlot(prompts_with_ranks, x="layer", y="ranks", color="prompt", title="Rank of Expected Token",label="expected",show_label=True,key="expected")
+
+def plot_prob_mean(prompts_with_probs):
+    summary_stats = prompts_with_probs.groupby("prompt")["probs"].agg(
+        mean_prob="mean", 
+        variance="var"
+    ).reset_index()
+    print("summary_stats",summary_stats)
+    # Calculate the standard deviation for error bars
+    summary_stats["std_dev"] = summary_stats["variance"] ** 0.5
+
+    # Create the bar plot with error bars
+    return gr.BarPlot(
+        summary_stats,
+        x="prompt",
+        y="mean_prob",
+        error_y="std_dev",
+        title="Mean Probability of Expected Token",
+    )
+
+def plot_rank_mean(prompts_with_ranks):
+    # Calculate mean and variance for each prompt
+    summary_stats = prompts_with_ranks.groupby("prompt")["ranks"].agg(
+        mean_rank="mean", 
+        variance="var"
+    ).reset_index()
+
+    # Calculate the standard deviation for error bars
+    summary_stats["std_dev"] = summary_stats["variance"] ** 0.5
+
+    # Create the bar plot with error bars
+    return gr.BarPlot(
+        summary_stats,
+        x="prompt",
+        y="mean_rank",
+        error_y="std_dev",
+        title="Mean Rank of Expected Token",
+    )
 
 def submit_prompts(prompts_data):
     # Initialize lists to accumulate results
@@ -145,7 +182,7 @@ def submit_prompts(prompts_data):
             "ranks": all_ranks,
             "expected": all_expected,
         })
-    return plot_prob(prompts_with_probs), plot_rank(prompts_with_ranks)
+    return plot_prob(prompts_with_probs), plot_rank(prompts_with_ranks),plot_prob_mean(prompts_with_probs),plot_rank_mean(prompts_with_ranks)
 
 
 def clear_all(prompts):
@@ -162,18 +199,20 @@ def gradio_interface():
         prompt_file.upload(process_file, inputs=[prompts_data,prompt_file], outputs=[prompts_data])
 
         # Define the outputs
-
         with gr.Row():
-            # I need this to only render after i click submit
             prob_visualization = plot_prob(prompts_with_probs)
             rank_visualization = plot_rank(prompts_with_ranks)
+        with gr.Row():
+            prob_mean_visualization = plot_prob_mean(prompts_with_probs)
+            rank_mean_visualization = plot_rank_mean(prompts_with_ranks)
 
         with gr.Row():
             clear_btn = gr.Button("Clear")
             clear_btn.click(clear_all, inputs=[prompts_data], outputs=[prompts_data,prob_visualization,rank_visualization])
             submit_btn = gr.Button("Submit")
-            submit_btn.click(submit_prompts, inputs=[prompts_data], outputs=[prob_visualization,rank_visualization])
+            submit_btn.click(submit_prompts, inputs=[prompts_data], outputs=[prob_visualization,rank_visualization,prob_mean_visualization,rank_mean_visualization])
         
+
         demo.launch()
 
 
