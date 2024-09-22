@@ -15,25 +15,26 @@ import os
 api_key = os.getenv('NNSIGHT_API_KEY')
 CONFIG.set_default_api_key(api_key)
 
+
 # Load the Language Model
-llama = LanguageModel("meta-llama/Meta-Llama-3.1-8B", device="cuda")
+llama = LanguageModel("meta-llama/Meta-Llama-3.1-8B")
 
 #placeholder for reset
 prompts_with_probs = pd.DataFrame(
 {
-    "prompt": ['waiting for data'],
+    "prompt": [''],
     "layer": [0],
-    "results": ['hi'],
+    "results": [''],
     "probs": [0],
-    "expected": ['hi'],
+    "expected": [''],
 })
 prompts_with_ranks = pd.DataFrame(
 {
-    "prompt": ['waiting for data'],
+    "prompt": [''],
     "layer": [0],
-    "results": ['hi'],
+    "results": [''],
     "ranks": [0],
-    "expected": ['hi'],
+    "expected": [''],
 })
 
 def run_lens(model,PROMPT):
@@ -53,7 +54,9 @@ def run_lens(model,PROMPT):
             logits_lens_token_result_by_layer.append(logits_lens_next_token)
         tokens_out = llama.lm_head.output.argmax(dim=-1).save()
         expected_token = tokens_out[0][-1].save()
-    logits_lens_all_probs = np.concatenate([probs[:, expected_token].cpu().detach().numpy() for probs in logits_lens_probs_by_layer])
+    # logits_lens_all_probs = np.concatenate([probs[:, expected_token].cpu().detach().numpy() for probs in logits_lens_probs_by_layer])
+    logits_lens_all_probs = np.concatenate([probs[:, expected_token].cpu().detach().to(torch.float32).numpy() for probs in logits_lens_probs_by_layer])
+
     #get the rank of the expected token from each layer's distribution
     for layer_probs in logits_lens_probs_by_layer:
         # Sort the probabilities in descending order and find the rank of the expected token
@@ -92,15 +95,6 @@ def process_file(prompts_data,file_path):
 
     return prompts
 
-
-
-#problem with using gr.LinePlot instead of a plt.figure is that text labels cannot be added for each individual point
-# def plot_prob(prompts_with_probs):
-#     return gr.LinePlot(prompts_with_probs, x="layer", y="probs",color="prompt", title="Probability of Expected Token",label="results",show_label=True,key="results")
-import matplotlib.pyplot as plt
-import pandas as pd
-import io
-from PIL import Image
 def plot_prob(prompts_with_probs):
     plt.figure(figsize=(10, 6))
     
@@ -114,13 +108,13 @@ def plot_prob(prompts_with_probs):
         
         # Annotate each point with the corresponding result
         for layer, prob, result in zip(prompt_data['layer'], prompt_data['probs'], prompt_data['results']):
-            plt.text(layer, prob, result, ha='right', va='bottom', fontsize=8)
+            plt.text(layer, prob, result, fontsize=8)
 
 
     # Add labels and title
     plt.xlabel('Layer Number')
     plt.ylabel('Probability of Expected Token')
-    plt.title('Logits Lens for All Prompts')
+    plt.title('Prob of expected token across layers\n(annotated with actual decoded output at each layer)')
     plt.grid(True)
     plt.ylim(0.0, 1.0)
     plt.legend(title='Prompts', bbox_to_anchor=(0.5, -0.15), loc='upper center', ncol=1)
@@ -132,13 +126,6 @@ def plot_prob(prompts_with_probs):
     img = Image.open(buf)
     plt.close()  # Close the figure to free memory
     return img
-# Example usage
-# prompts_with_probs should be a DataFrame with 'prompt', 'layer', and 'probs' columns
-
-import matplotlib.pyplot as plt
-import pandas as pd
-import io
-from PIL import Image
 
 def plot_rank(prompts_with_ranks):
     plt.figure(figsize=(10, 6))
@@ -158,7 +145,7 @@ def plot_rank(prompts_with_ranks):
     # Add labels and title
     plt.xlabel('Layer Number')
     plt.ylabel('Rank of Expected Token')
-    plt.title('Logits Lens Rank for All Prompts')
+    plt.title('Rank of expected token across layers\n(annotated with decoded output at each layer)')
     plt.grid(True)
     plt.ylim(bottom=0)  # Adjust if needed, depending on your rank values
     plt.legend(title='Prompts', bbox_to_anchor=(0.5, -0.15), loc='upper center', ncol=1)
@@ -171,11 +158,6 @@ def plot_rank(prompts_with_ranks):
     img = Image.open(buf)
     plt.close()  # Close the figure to free memory
     return img
-
-import matplotlib.pyplot as plt
-import pandas as pd
-import io
-from PIL import Image
 
 def plot_prob_mean(prompts_with_probs):
     # Calculate mean probabilities and variance
@@ -193,9 +175,11 @@ def plot_prob_mean(prompts_with_probs):
     # Add labels and title
     plt.xlabel('Prompt')
     plt.ylabel('Mean Probability')
-    plt.title('Mean Probability of Expected Token with Error Bars')
+    plt.title('Mean Probability of Expected Token')
     plt.xticks(rotation=45, ha='right')
     plt.grid(axis='y')
+    plt.ylim(0, 1)
+
 
     # Annotate the mean and variance on the bars
     for bar, mean, var in zip(bars, summary_stats['mean_prob'], summary_stats['variance']):
@@ -210,9 +194,6 @@ def plot_prob_mean(prompts_with_probs):
     img = Image.open(buf)
     plt.close()  # Close the figure to free memory
     return img
-
-# Example usage
-# prompts_with_probs should be a DataFrame with 'prompt' and 'probs' columns
 
 def plot_rank_mean(prompts_with_ranks):
     # Calculate mean ranks and variance
@@ -230,7 +211,7 @@ def plot_rank_mean(prompts_with_ranks):
     # Add labels and title
     plt.xlabel('Prompt')
     plt.ylabel('Mean Rank')
-    plt.title('Mean Rank of Expected Token with Error Bars')
+    plt.title('Mean Rank of Expected Token')
     plt.xticks(rotation=45, ha='right')
     plt.grid(axis='y')
 
@@ -299,33 +280,37 @@ def submit_prompts(prompts_data):
 
 def clear_all(prompts):
     prompts=[['']]
+    # prompt_file=gr.File(type="filepath", label="Upload a File with Prompts")
+    prompt_file = None
     prompts_data = gr.Dataframe(headers=["Prompt"], row_count=5, col_count=1, value= prompts, type="array", interactive=True)
-    return prompts_data,plot_prob(prompts_with_probs),plot_rank(prompts_with_ranks),plot_prob_mean(prompts_with_probs),plot_rank_mean(prompts_with_ranks)
+    return prompts_data,prompt_file,plot_prob(prompts_with_probs),plot_rank(prompts_with_ranks),plot_prob_mean(prompts_with_probs),plot_rank_mean(prompts_with_ranks)
 
 
 def gradio_interface():
     with gr.Blocks(theme="gradio/monochrome") as demo:
         prompts=[['']]
-        prompts_data = gr.Dataframe(headers=["Prompt"], row_count=5, col_count=1, value= prompts, type="array", interactive=True)
-        prompt_file=gr.File(type="filepath", label="Upload a File with Prompts")
+        with gr.Row():
+            with gr.Column(scale=3):
+                prompts_data = gr.Dataframe(headers=["Prompt"], row_count=5, col_count=1, value= prompts, type="array", interactive=True)
+            with gr.Column(scale=1):
+                prompt_file=gr.File(type="filepath", label="Upload a File with Prompts")
         prompt_file.upload(process_file, inputs=[prompts_data,prompt_file], outputs=[prompts_data])
-
         # Define the outputs
         with gr.Row():
-            prob_visualization = gr.Image(value=plot_prob(prompts_with_probs), type="pil", label="Probability of Expected Token")
-            rank_visualization = gr.Image(value=plot_rank(prompts_with_ranks), type="pil", label="Rank of Expected Token")
-        with gr.Row():
-            prob_mean_visualization = gr.Image(value=plot_prob_mean(prompts_with_probs), type="pil", label="Mean Probability of Expected Token")
-            rank_mean_visualization = gr.Image(value=plot_rank_mean(prompts_with_ranks), type="pil", label="Mean Rank of Expected Token")
-
-        with gr.Row():
             clear_btn = gr.Button("Clear")
-            clear_btn.click(clear_all, inputs=[prompts_data], outputs=[prompts_data,prob_visualization,rank_visualization,prob_mean_visualization,rank_mean_visualization])
             submit_btn = gr.Button("Submit")
-            submit_btn.click(submit_prompts, inputs=[prompts_data], outputs=[prob_visualization,rank_visualization,prob_mean_visualization,rank_mean_visualization])#
+        with gr.Row():
+            prob_visualization = gr.Image(value=plot_prob(prompts_with_probs), type="pil",label=" ")
+            rank_visualization = gr.Image(value=plot_rank(prompts_with_ranks), type="pil",label=" ")
+        with gr.Row():
+            prob_mean_visualization = gr.Image(value=plot_prob_mean(prompts_with_probs), type="pil",label=" ")
+            rank_mean_visualization = gr.Image(value=plot_rank_mean(prompts_with_ranks), type="pil",label=" ")
+
+        clear_btn.click(clear_all, inputs=[prompts_data], outputs=[prompts_data,prompt_file,prob_visualization,rank_visualization,prob_mean_visualization,rank_mean_visualization])
+        submit_btn.click(submit_prompts, inputs=[prompts_data], outputs=[prob_visualization,rank_visualization,prob_mean_visualization,rank_mean_visualization])#
+        prompt_file.clear(clear_all, inputs=[prompts_data], outputs=[prompts_data,prompt_file,prob_visualization,rank_visualization,prob_mean_visualization,rank_mean_visualization])
         
 
         demo.launch()
-
 
 gradio_interface()
