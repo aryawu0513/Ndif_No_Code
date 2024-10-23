@@ -46,35 +46,34 @@ prompts_with_ranks = pd.DataFrame(
 })
 
 def run_lens(model,PROMPT):
-    logits_lens_token_result_by_layer = []
-    logits_lens_probs_by_layer = []
-    logits_lens_ranks_by_layer = []
+    logit_lens_token_result_by_layer = []
+    logit_lens_probs_by_layer = []
+    logit_lens_ranks_by_layer = []
     input_ids = model.tokenizer.encode(PROMPT)
     with model.trace(input_ids, remote=True) as runner:
         for layer_ix,layer in enumerate(model.model.layers):
             hidden_state = layer.output[0][0]
-            logits_lens_normed_last_token = model.model.norm(hidden_state)
-            logits_lens_token_distribution = model.lm_head(logits_lens_normed_last_token)
-            logits_lens_last_token_logits = logits_lens_token_distribution[-1:]
-            logits_lens_probs = F.softmax(logits_lens_last_token_logits, dim=1).save()
-            logits_lens_probs_by_layer.append(logits_lens_probs)
-            logits_lens_next_token = torch.argmax(logits_lens_probs, dim=1).save()
-            logits_lens_token_result_by_layer.append(logits_lens_next_token)
+            logit_lens_normed_last_token = model.model.norm(hidden_state)
+            logit_lens_token_distribution = model.lm_head(logit_lens_normed_last_token)
+            logit_lens_last_token_logit = logit_lens_token_distribution[-1:]
+            logit_lens_probs = F.softmax(logit_lens_last_token_logit, dim=1).save()
+            logit_lens_probs_by_layer.append(logit_lens_probs)
+            logit_lens_next_token = torch.argmax(logit_lens_probs, dim=1).save()
+            logit_lens_token_result_by_layer.append(logit_lens_next_token)
         tokens_out = model.lm_head.output.argmax(dim=-1).save()
         expected_token = tokens_out[0][-1].save()
-    # logits_lens_all_probs = np.concatenate([probs[:, expected_token].cpu().detach().numpy() for probs in logits_lens_probs_by_layer])
-    logits_lens_all_probs = np.concatenate([probs[:, expected_token].cpu().detach().to(torch.float32).numpy() for probs in logits_lens_probs_by_layer])
+    logit_lens_all_probs = np.concatenate([probs[:, expected_token].cpu().detach().to(torch.float32).numpy() for probs in logit_lens_probs_by_layer])
 
     #get the rank of the expected token from each layer's distribution
-    for layer_probs in logits_lens_probs_by_layer:
+    for layer_probs in logit_lens_probs_by_layer:
         # Sort the probabilities in descending order and find the rank of the expected token
         sorted_probs, sorted_indices = torch.sort(layer_probs, descending=True)
         # Find the rank of the expected token (1-based rank)
         expected_token_rank = (sorted_indices == expected_token).nonzero(as_tuple=True)[1].item() + 1
-        logits_lens_ranks_by_layer.append(expected_token_rank)
+        logit_lens_ranks_by_layer.append(expected_token_rank)
     actual_output = model.tokenizer.decode(expected_token.item())
-    logits_lens_results = [model.tokenizer.decode(next_token.item()) for next_token in logits_lens_token_result_by_layer]
-    return logits_lens_results, logits_lens_all_probs, actual_output,logits_lens_ranks_by_layer
+    logit_lens_results = [model.tokenizer.decode(next_token.item()) for next_token in logit_lens_token_result_by_layer]
+    return logit_lens_results, logit_lens_all_probs, actual_output,logit_lens_ranks_by_layer
 
 
 def process_file(prompts_data,file_path):
@@ -119,32 +118,32 @@ def plot_prob(prompts_with_probs):
         # Annotate each point with the corresponding result
         for layer, prob, result in zip(prompt_data['layer'], prompt_data['probs'], prompt_data['results']):
             text = plt.text(layer, prob, result, fontsize=8)
-            texts.append(text)  # Add text to the list
+            texts.append(text)
 
     # Add labels and title
     plt.xlabel('Layer Number')
     plt.ylabel('Probability')
     plt.title('Probability of most-likely output token')
     plt.grid(True)
-    plt.xlim(0, 31)
+    plt.xlim(0,max(prompts_with_probs['layer']))
     plt.ylim(0.0, 1.0)
     plt.legend(title='Prompts', bbox_to_anchor=(0.5, -0.15), loc='upper center', ncol=1)
 
     # Adjust text to prevent overlap
-    adjust_text(texts, only_move={'points': 'y', 'texts': 'y'}, 
+    adjust_text(texts, only_move={'points': 'xy', 'texts': 'xy'}, 
                 arrowprops=dict(arrowstyle="->", color='r', lw=0.5))
 
-    # Save the plot to a buffer
+    # Save the plot
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight')  # Use bbox_inches to avoid cutting off labels
+    plt.savefig(buf, format='png', bbox_inches='tight')
     buf.seek(0)
     img = Image.open(buf)
-    plt.close()  # Close the figure to free memory
+    plt.close()
     return img
 
 def plot_rank(prompts_with_ranks):
     plt.figure(figsize=(10, 6))
-    texts = []  # List to hold text annotations for adjustment
+    texts = []
 
     # Iterate over each prompt and plot its ranks
     for prompt in prompts_with_ranks['prompt'].unique():
@@ -158,27 +157,27 @@ def plot_rank(prompts_with_ranks):
         # Annotate each point with the corresponding result
         for layer, rank, result in zip(prompt_data['layer'], prompt_data['ranks'], prompt_data['results']):
             text = plt.text(layer, rank, result, ha='right', va='bottom', fontsize=8)
-            texts.append(text)  # Add text to the list
+            texts.append(text)
 
     # Add labels and title
     plt.xlabel('Layer Number')
     plt.ylabel('Rank')
     plt.title('Rank of most-likely output token')
     plt.grid(True)
-    plt.xlim(0, 31)
-    plt.ylim(bottom=0)  # Adjust if needed, depending on your rank values
+    plt.xlim(0,max(prompts_with_ranks['layer']))
+    plt.ylim(bottom=0)
     plt.legend(title='Prompts', bbox_to_anchor=(0.5, -0.15), loc='upper center', ncol=1)
 
     # Adjust text to prevent overlap
-    adjust_text(texts,only_move={'texts': 'y'},
+    adjust_text(texts,only_move={'points': 'xy', 'texts': 'xy'},
                 arrowprops=dict(arrowstyle="->", color='r', lw=0.5))
 
-    # Save the plot to a buffer
+    # Save the plot
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight')  # Use bbox_inches to avoid cutting off labels
+    plt.savefig(buf, format='png', bbox_inches='tight')
     buf.seek(0)
     img = Image.open(buf)
-    plt.close()  # Close the figure to free memory
+    plt.close()
     return img
 
 def submit_prompts(model_name, prompts_data):
@@ -239,7 +238,8 @@ def clear_all(prompts):
 
 def gradio_interface():
     with gr.Blocks(theme="gradio/monochrome") as demo:
-        prompts=[['']]
+        prompts = [['The Eiffel Tower is located in the city of'],['Vatican is located in the city of']]
+        
         with gr.Row():
             with gr.Column(scale=3):
                 model_dropdown = gr.Dropdown(choices=list(MODEL_OPTIONS.keys()), label="Select Model", value="Llama3.1-8B")
@@ -261,13 +261,17 @@ def gradio_interface():
             gr.Markdown("The graph below illustrates the probability of this most likely output token as it is decoded at each layer of the model. Each point on the graph is annotated with the decoded output corresponding to the token that has the highest probability at that particular layer.")
             gr.Markdown("The graph below illustrates the rank of this most likely output token as it is decoded at each layer of the model. Each point on the graph is annotated with the decoded output corresponding to the token that has the lowest rank at that particular layer.")
 
+        prob_img, rank_img = submit_prompts(model_dropdown.value, prompts)
+
         with gr.Row():
-            prob_visualization = gr.Image(value=plot_prob(prompts_with_probs), type="pil",label=" ")
-            rank_visualization = gr.Image(value=plot_rank(prompts_with_ranks), type="pil",label=" ")
+            prob_visualization = gr.Image(value=prob_img, type="pil",label=" ")
+            rank_visualization = gr.Image(value=rank_img, type="pil",label=" ")
 
         clear_btn.click(clear_all, inputs=[prompts_data], outputs=[prompts_data,prompt_file,prob_visualization,rank_visualization])
         submit_btn.click(submit_prompts, inputs=[model_dropdown,prompts_data], outputs=[prob_visualization,rank_visualization])#
         prompt_file.clear(clear_all, inputs=[prompts_data], outputs=[prompts_data,prompt_file,prob_visualization,rank_visualization])
+        
+        # Generate plots with sample prompts on load
         
         demo.launch()
 
